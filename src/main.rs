@@ -1,19 +1,20 @@
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
+use std::isize;
 use std::path::Path;
 use std::{env, process::exit};
 
 //Think of these as the amount you would have to add to get to any cells neighbor, with origin at top left
-const NORTH: (i8, i8) = (0, -1);
-const EAST: (i8, i8) = (1, 0);
-const WEST: (i8, i8) = (-1, 0);
-const SOUTH: (i8, i8) = (0, 1);
-const NORTH_EAST: (i8, i8) = (1, -1);
-const NORTH_WEST: (i8, i8) = (-1, -1);
-const SOUTH_EAST: (i8, i8) = (1, 1);
-const SOUTH_WEST: (i8, i8) = (-1, 1);
+const NORTH: (isize, isize) = (0, -1);
+const EAST: (isize, isize) = (1, 0);
+const WEST: (isize, isize) = (-1, 0);
+const SOUTH: (isize, isize) = (0, 1);
+const NORTH_EAST: (isize, isize) = (1, -1);
+const NORTH_WEST: (isize, isize) = (-1, -1);
+const SOUTH_EAST: (isize, isize) = (1, 1);
+const SOUTH_WEST: (isize, isize) = (-1, 1);
 
-const DIRECTIONS: [(i8, i8); 8] = [
+const DIRECTIONS: [(isize, isize); 8] = [
     NORTH, SOUTH, EAST, WEST, NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST,
 ];
 
@@ -38,6 +39,55 @@ impl Grid {
                 self.cells[row_idx][idx] = true;
             }
         }
+    }
+
+    fn check_valid_dir(&self, cell: (usize, usize), dir: (isize, isize)) -> bool {
+        //This is not a good solution.
+        if cell.0 == 0 && dir.0 == -1 {
+            return false;
+        }
+
+        if cell.1 == 0 && dir.1 == -1 {
+            return false;
+        }
+
+        return true;
+    }
+
+    fn translate_coords(cell: (usize, usize), coord: (isize, isize)) -> (usize, usize) {
+        let mut new_coord: (usize, usize) = cell;
+        //Only use this after having used check_valid_dir. This sucks and is too verbose.
+        //TODO: Handle over max size
+        if coord.0.is_negative() {
+            new_coord.0 = cell.0 - coord.0.wrapping_abs() as usize;
+        } else {
+            new_coord.0 = cell.0 + coord.0.wrapping_abs() as usize;
+        }
+
+        if coord.1.is_negative() {
+            new_coord.1 = cell.1 - coord.1.wrapping_abs() as usize;
+        } else {
+            new_coord.1 = cell.1 + coord.1.wrapping_abs() as usize;
+        }
+
+        return new_coord;
+    }
+
+    fn get_neighbors(&self, cell: (usize, usize)) -> Vec<(usize, usize)> {
+        let mut neighbors: Vec<(usize, usize)> = Vec::new();
+
+        for direction in DIRECTIONS {
+            if Self::check_valid_dir(&self, cell, direction) {
+                //TODO: Check if the neighbor is TRUE
+                let coord = Self::translate_coords(cell, direction);
+
+                if (self.cells[coord.0][coord.1] == true) {
+                    neighbors.push((coord.0, coord.1));
+                }
+            }
+        }
+
+        return neighbors;
     }
 
     fn setup_grid(&mut self, grid_file_path: &str) -> Result<Self, std::io::Error> {
@@ -111,4 +161,10 @@ fn main() {
 
     grid = Grid::setup_grid(&mut grid, "test.grid").unwrap();
     grid.print_grid();
+
+    let test = Grid::get_neighbors(&grid, (0, 2));
+
+    for (x, y) in test {
+        println!("Neighbor for ({},{}) at ({},{})", 0, 2, x, y);
+    }
 }
