@@ -1,8 +1,13 @@
+use std::error::Error;
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::isize;
+use std::num::ParseIntError;
 use std::path::Path;
-use std::{env, process::exit};
+use std::{env};
+
+
+use thiserror::Error;
 
 //Think of these as the amount you would have to add to get to any cells neighbor, with origin at top left
 const NORTH: (isize, isize) = (0, -1);
@@ -22,11 +27,40 @@ const ALIVE: char = '*';
 const DEAD: char = '.';
 const WALL: char = '+';
 
+
 struct Grid {
     //X and Y
     dims: (usize, usize),
     cells: Vec<Vec<bool>>,
 }
+
+#[derive(Error)]
+enum GridError
+{
+    #[error(r#"Issue opening the grid file:"#)]
+    GridFileError(#[from] std::io::Error),
+
+    #[error(r#"Error reading dimensions of grid file. Ensure it is formatted as per the example file."#)]
+    GridDimError(#[from] std::num::ParseIntError)
+
+
+
+}
+
+impl std::fmt::Debug for GridError
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result 
+    {
+        let _ = writeln!(f, "{}", self);
+
+        if let Some(source) = self.source()
+        {
+            writeln!(f, "Error caused by: {}", source)?;
+        }
+        Ok(())
+    }
+}
+
 
 impl Grid {
     fn setup_row(&mut self, row: &str, row_idx: usize) {
@@ -90,7 +124,8 @@ impl Grid {
         return neighbors;
     }
 
-    fn setup_grid(&mut self, grid_file_path: &str) -> Result<Self, std::io::Error> {
+    fn setup_grid(&mut self, grid_file_path: &str) -> Result<Self, GridError> {
+        use GridError::*;
         let path = Path::new(&grid_file_path);
 
         let grid_file = File::open(path)?;
@@ -106,8 +141,8 @@ impl Grid {
 
         //-2 because we want to ignore the walls. The size in the gridfile includes the walls.
         self.dims = (
-            dimension_strs.0.parse::<usize>().unwrap() - 2,
-            dimension_strs.1.trim_end().parse::<usize>().unwrap(),
+            dimension_strs.0.parse::<usize>()? - 2,
+            dimension_strs.1.trim_end().parse::<usize>()? - 2,
         );
 
         self.cells = vec![vec![false; self.dims.0]; self.dims.1];
@@ -159,7 +194,7 @@ fn main() {
         dims: (0, 0),
     };
 
-    grid = Grid::setup_grid(&mut grid, "test.grid").unwrap();
+    grid = Grid::setup_grid(&mut grid, "test1.grid").unwrap();
     grid.print_grid();
 
     let test = Grid::get_neighbors(&grid, (0, 2));
