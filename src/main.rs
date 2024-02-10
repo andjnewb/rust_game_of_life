@@ -1,11 +1,13 @@
+use core::num;
+use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::isize;
 use std::num::ParseIntError;
 use std::path::Path;
-use std::{env};
-
+use std::thread::sleep;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -27,40 +29,33 @@ const ALIVE: char = '*';
 const DEAD: char = '.';
 const WALL: char = '+';
 
-
 struct Grid {
-    //X and Y
+    //X and Y for dims but stored in cells as Y and X
     dims: (usize, usize),
     cells: Vec<Vec<bool>>,
 }
 
 #[derive(Error)]
-enum GridError
-{
+enum GridError {
     #[error(r#"Issue opening the grid file:"#)]
     GridFileError(#[from] std::io::Error),
 
-    #[error(r#"Error reading dimensions of grid file. Ensure it is formatted as per the example file."#)]
-    GridDimError(#[from] std::num::ParseIntError)
-
-
-
+    #[error(
+        r#"Error reading dimensions of grid file. Ensure it is formatted as per the example file."#
+    )]
+    GridDimError(#[from] std::num::ParseIntError),
 }
 
-impl std::fmt::Debug for GridError
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result 
-    {
+impl std::fmt::Debug for GridError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let _ = writeln!(f, "{}", self);
 
-        if let Some(source) = self.source()
-        {
+        if let Some(source) = self.source() {
             writeln!(f, "Error caused by: {}", source)?;
         }
         Ok(())
     }
 }
-
 
 impl Grid {
     fn setup_row(&mut self, row: &str, row_idx: usize) {
@@ -85,6 +80,21 @@ impl Grid {
             return false;
         }
 
+        //If this is confusing, it's because the dims are X and Y but cells are stored Y and X.
+        if cell.0 == self.dims.1 - 1 && dir.0 == 1 {
+            return false;
+        }
+
+        if cell.1 == self.dims.0 - 1 && dir.1 == 1 {
+            return false;
+        }
+
+        if(cell.0 == self.dims.1 || cell.1 == self.dims.0)
+        {
+            println!("WTF");
+            return false;
+        }
+
         return true;
     }
 
@@ -104,6 +114,11 @@ impl Grid {
             new_coord.1 = cell.1 + coord.1.wrapping_abs() as usize;
         }
 
+        //This is dumb but whatever
+        let test = new_coord.0;
+        new_coord.0 = new_coord.1;
+        new_coord.1 = test;
+
         return new_coord;
     }
 
@@ -115,8 +130,11 @@ impl Grid {
                 //TODO: Check if the neighbor is TRUE
                 let coord = Self::translate_coords(cell, direction);
 
-                if (self.cells[coord.0][coord.1] == true) {
-                    neighbors.push((coord.0, coord.1));
+                //println!("{},{}", coord.1, coord.0);
+
+                if  self.cells[coord.1][coord.0] {
+                    //neighbors.push((coord.1, coord.0));
+
                 }
             }
         }
@@ -183,6 +201,38 @@ impl Grid {
             println!();
         }
     }
+
+    fn determine_cell_state(&self, cell: (usize, usize)) -> bool {
+        let neighbors = self.get_neighbors(cell);
+        let num_neighbors = neighbors.len();
+
+        if num_neighbors < 2 {
+            return false;
+        }
+
+        if num_neighbors == 3 {
+            return true;
+        }
+
+        if num_neighbors > 3 {
+            return false;
+        }
+
+        return true;
+    }
+
+    fn iterate_grid(&mut self) {
+        let mut y: usize = 0;
+
+        while (y < self.dims.0) {
+            let mut x: usize = 0;
+            while (x < self.dims.1) {
+                self.cells[y][x] = self.determine_cell_state((y, x));
+                x += 1;
+            }
+            y += 1;
+        }
+    }
 }
 
 fn main() {
@@ -194,12 +244,24 @@ fn main() {
         dims: (0, 0),
     };
 
-    grid = Grid::setup_grid(&mut grid, "test1.grid").unwrap();
-    grid.print_grid();
+    grid = Grid::setup_grid(&mut grid, "test.grid").unwrap();
 
-    let test = Grid::get_neighbors(&grid, (0, 2));
+    let wait = Duration::new(1, 0);
 
-    for (x, y) in test {
-        println!("Neighbor for ({},{}) at ({},{})", 0, 2, x, y);
+
+    //println!("{}", grid.cells.len());
+
+    loop {
+        clearscreen::clear().expect("Failed to clear screen..");
+        grid.print_grid();
+        println!();
+        grid.iterate_grid();
+        sleep(wait);
     }
+
+    // let test = Grid::get_neighbors(&grid, (5, 11));
+
+    // for (x, y) in test {
+    //     println!("Neighbor for ({},{}) at ({},{})", 5, 11, y, x);
+    // }
 }
