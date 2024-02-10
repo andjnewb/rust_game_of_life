@@ -95,7 +95,7 @@ impl Grid {
             return false;
         }
 
-        return true;
+        return false;
     }
 
     fn translate_coords(cell: (usize, usize), coord: (isize, isize)) -> (usize, usize) {
