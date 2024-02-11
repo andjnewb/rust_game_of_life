@@ -8,7 +8,7 @@ use std::num::ParseIntError;
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
-
+use std::io::Read;
 use thiserror::Error;
 
 //Think of these as the amount you would have to add to get to any cells neighbor, with origin at top left
@@ -35,161 +35,151 @@ struct Grid {
     cells: Vec<Vec<bool>>,
 }
 
-#[derive(Error)]
-enum GridError {
-    #[error(r#"Issue opening the grid file:"#)]
-    GridFileError(#[from] std::io::Error),
-
-    #[error(
-        r#"Error reading dimensions of grid file. Ensure it is formatted as per the example file."#
-    )]
-    GridDimError(#[from] std::num::ParseIntError),
+struct coord
+{
+    loc: (isize, isize),
 }
 
-impl std::fmt::Debug for GridError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = writeln!(f, "{}", self);
+impl std::ops::Add  for coord {
+    type Output = Option<(usize, usize)>;
 
-        if let Some(source) = self.source() {
-            writeln!(f, "Error caused by: {}", source)?;
+    fn add(self, rhs: Self) -> Self::Output {
+        let mut out:(isize, isize) = (0,0);
+        if rhs.loc.0.is_negative()
+        {
+            out.0 = self.loc.0 - rhs.loc.0.abs();
         }
-        Ok(())
+        else
+        {
+            out.0 = self.loc.0 + rhs.loc.0;
+        }
+
+        if rhs.loc.1.is_negative()
+        {
+            out.1 = self.loc.1 - rhs.loc.1.abs();
+        }
+        else
+        {
+            out.1 = self.loc.1 + rhs.loc.1;
+        }
+
+
+
+        Some((out.0 as usize, out.1 as usize))
     }
 }
 
+#[derive(Debug, Error)]
+pub enum LoadError {
+    #[error("Issue opening the grid file: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error(
+        "Error reading dimensions of grid file: {0}. Ensure it is formatted as per the example file."
+    )]
+    Format(#[from] std::num::ParseIntError),
+
+    #[error("Reached the end of the file unexpectedly")]
+    Eof,
+
+    // this could include more information, like the character in question, or where to find it
+    #[error("todo")]
+    BadChar,
+
+    #[error("Dimensions did not match file header")]
+    DimensionMismatch,
+    
+    #[error("you shouldn't actually have something this unhelpful")]
+    Other,
+}
+
+
+
 impl Grid {
-    fn setup_row(&mut self, row: &str, row_idx: usize) {
-        let mut new_row: String = row.to_string();
+    
+    pub fn load_from_file(path: &str) -> Result<Self, LoadError> {
+        let text = std::fs::read_to_string(path)?;
 
-        //Trim the walls off
+        let cells = text
+            .lines()
+            .skip_while(|l| l.starts_with('#'))
+            .map(|l| l.chars().map(|c| c == '*').collect())
+            .collect::<Vec<Vec<bool>>>();
 
-        for (idx, c) in new_row.char_indices() {
-            if c == ALIVE {
-                self.cells[row_idx][idx] = true;
+        for row in &cells {
+            if row.len() != cells[0].len() {
+                // todo
+                return Err(LoadError::DimensionMismatch);
             }
         }
+        let dimY = cells.len();
+        let dimX = cells[0].len();
+
+        Ok(Self { cells, dims: (dimY, dimX) })
     }
 
     fn check_valid_dir(&self, cell: (usize, usize), dir: (isize, isize)) -> bool {
         //This is not a good solution.
-        if cell.0 == 0 && dir.0 == -1 {
-            return false;
-        }
 
-        if cell.1 == 0 && dir.1 == -1 {
-            return false;
-        }
+        
+        let orig = coord{loc: (cell.0 as isize, cell.1 as isize)};
 
-        //If this is confusing, it's because the dims are X and Y but cells are stored Y and X.
-        if cell.0 == self.dims.1 - 1 && dir.0 == 1 {
-            return false;
-        }
+        let orig2 = coord{loc: (dir.0 , dir.1)};
 
-        if cell.1 == self.dims.0 - 1 && dir.1 == 1 {
-            return false;
-        }
+        let test = orig + orig2;
 
-        if(cell.0 == self.dims.1 || cell.1 == self.dims.0)
+        if(test.unwrap().0 >= self.dims.0 || test.unwrap().1 >= self.dims.1)
         {
-            println!("WTF");
             return false;
         }
 
-        return false;
-    }
-
-    fn translate_coords(cell: (usize, usize), coord: (isize, isize)) -> (usize, usize) {
-        let mut new_coord: (usize, usize) = cell;
-        //Only use this after having used check_valid_dir. This sucks and is too verbose.
-        //TODO: Handle over max size
-        if coord.0.is_negative() {
-            new_coord.0 = cell.0 - coord.0.wrapping_abs() as usize;
-        } else {
-            new_coord.0 = cell.0 + coord.0.wrapping_abs() as usize;
+        if(cell.0 == 0 && dir.0.is_negative()) || (cell.1 == 0 && dir.1.is_negative()) 
+        {
+            return false;
         }
 
-        if coord.1.is_negative() {
-            new_coord.1 = cell.1 - coord.1.wrapping_abs() as usize;
-        } else {
-            new_coord.1 = cell.1 + coord.1.wrapping_abs() as usize;
-        }
+        // println!("Neighbor for {:?} at {:?}", 
+        // cell, test);
 
-        //This is dumb but whatever
-        let test = new_coord.0;
-        new_coord.0 = new_coord.1;
-        new_coord.1 = test;
-
-        return new_coord;
+        return true;
     }
+
+    
 
     fn get_neighbors(&self, cell: (usize, usize)) -> Vec<(usize, usize)> {
         let mut neighbors: Vec<(usize, usize)> = Vec::new();
 
         for direction in DIRECTIONS {
             if Self::check_valid_dir(&self, cell, direction) {
-                //TODO: Check if the neighbor is TRUE
-                let coord = Self::translate_coords(cell, direction);
 
-                //println!("{},{}", coord.1, coord.0);
+                let c = coord {loc: (cell.0 as isize, cell.1 as isize)};
+                let d = coord {loc: (direction.0 as isize, direction.1 as isize)};
 
-                if  self.cells[coord.1][coord.0] {
-                    //neighbors.push((coord.1, coord.0));
+                let res = c + d;
 
+                if(self.cells[res.unwrap().0][res.unwrap().1])
+                {
+                    neighbors.push( (res).expect("Uh oh"));
                 }
+                
             }
         }
 
         return neighbors;
     }
 
-    fn setup_grid(&mut self, grid_file_path: &str) -> Result<Self, GridError> {
-        use GridError::*;
-        let path = Path::new(&grid_file_path);
-
-        let grid_file = File::open(path)?;
-
-        let mut reader = BufReader::new(grid_file);
-
-        let mut dim_line = String::new();
-        let _dim_line_len = reader.read_line(&mut dim_line);
-
-        let dimension_strs: (&str, &str) = dim_line.split_once('x').unwrap();
-
-        println!("{},{}", dimension_strs.0, dimension_strs.1);
-
-        //-2 because we want to ignore the walls. The size in the gridfile includes the walls.
-        self.dims = (
-            dimension_strs.0.parse::<usize>()? - 2,
-            dimension_strs.1.trim_end().parse::<usize>()? - 2,
-        );
-
-        self.cells = vec![vec![false; self.dims.0]; self.dims.1];
-
-        let mut ceiling = String::new();
-
-        let _ = reader.read_line(&mut ceiling);
-
-        ceiling = ceiling.trim_end().to_string();
-
-        let mut row = String::new();
-
-        //Floor will look exactly the same as the ceiling
-
-        let mut row_idx = 0;
-        while (row != ceiling) {
-            row.clear();
-            let _ = reader.read_line(&mut row);
-            Self::setup_row(self, &row, row_idx);
-            row_idx += 1;
-        }
-
-        Ok(Grid {
-            dims: self.dims,
-            cells: self.cells.clone(),
-        })
-    }
+    
 
     fn print_grid(&self) {
+
+        // let mut x = 0;
+        // while(x < self.dims.1)
+        // {
+        //     print!("{}", x);
+        //     x += 1;
+        // }
+        // println!{};
+
         for row in &self.cells {
             for col in row {
                 if *col == true {
@@ -202,36 +192,61 @@ impl Grid {
         }
     }
 
-    fn determine_cell_state(&self, cell: (usize, usize)) -> bool {
+    fn determine_cell_state(& mut self, cell: (usize, usize)) -> bool {
+        let mut live : bool = self.cells[cell.0][cell.1];
         let neighbors = self.get_neighbors(cell);
-        let num_neighbors = neighbors.len();
+        let num_living_neighbors = neighbors
+        .iter()
+        .filter(|c| self.cells[c.0][c.1])
+        .count();
 
-        if num_neighbors < 2 {
-            return false;
+        //println!("Cell: {},{} {:?}", cell.0, cell.1, num_living_neighbors);
+
+        //TODO::FIX
+        if live && (num_living_neighbors < 2)
+        {
+            live = false;
         }
 
-        if num_neighbors == 3 {
-            return true;
+        if ( live && (num_living_neighbors == 2)) || ( live && (num_living_neighbors == 3))
+        {
+            live = true;
         }
 
-        if num_neighbors > 3 {
-            return false;
+        if live && (num_living_neighbors > 3)
+        {
+            live = false;
         }
 
-        return true;
+        if !live && (num_living_neighbors == 3)
+        {
+            live = true;
+        }
+
+
+        return live;
     }
 
     fn iterate_grid(&mut self) {
-        let mut y: usize = 0;
+        let mut new_grid:Vec<Vec<bool>> = self.cells.clone();
 
-        while (y < self.dims.0) {
-            let mut x: usize = 0;
-            while (x < self.dims.1) {
-                self.cells[y][x] = self.determine_cell_state((y, x));
+
+        let mut y:usize = 0;
+
+        while y < self.dims.0
+        {
+            let mut x:usize = 0;
+            while x < self.dims.1
+            {
+                new_grid[y][x] = self.determine_cell_state((y,x));
                 x += 1;
             }
+            
             y += 1;
         }
+
+        //print!("{:?}", new_grid);
+        self.cells = new_grid;
     }
 }
 
@@ -244,7 +259,10 @@ fn main() {
         dims: (0, 0),
     };
 
-    grid = Grid::setup_grid(&mut grid, "test.grid").unwrap();
+
+    grid = Grid::load_from_file("test.grid").unwrap();
+
+    
 
     let wait = Duration::new(1, 0);
 
